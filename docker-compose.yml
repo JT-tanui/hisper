@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "12000:12000"
+    environment:
+      - DATABASE_URL=sqlite:///./hisper.db
+      - DEBUG=false
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+      - hisper_data:/app/data
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - hisper-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "12001:12001"
+    environment:
+      - VITE_API_URL=http://localhost:12000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - hisper-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - hisper-network
+
+volumes:
+  hisper_data:
+  redis_data:
+
+networks:
+  hisper-network:
+    driver: bridge
