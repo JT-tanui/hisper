@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     MONITORING_ENABLED: bool = True
     METRICS_RETENTION_HOURS: int = 168  # 7 days
     ALERT_WEBHOOK_URL: Optional[str] = None
+
+    # Plugins
+    PLUGIN_MANIFEST_DIRS: List[str] = ["./plugins"]
     
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v):

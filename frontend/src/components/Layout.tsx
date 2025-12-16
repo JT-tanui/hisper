@@ -15,6 +15,7 @@ import { useState } from 'react'
 
 interface LayoutProps {
   children: ReactNode
+  pluginPanels?: { title: string; route: string; navigationLabel?: string }[]
 }
 
 const navigation = [
@@ -26,9 +27,18 @@ const navigation = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
-export default function Layout({ children }: LayoutProps) {
+export default function Layout({ children, pluginPanels = [] }: LayoutProps) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const navWithPlugins = [
+    ...navigation,
+    ...pluginPanels.map((panel) => ({
+      name: panel.navigationLabel || panel.title,
+      href: panel.route,
+      icon: Activity,
+    })),
+  ]
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -49,7 +59,7 @@ export default function Layout({ children }: LayoutProps) {
             </button>
           </div>
           <nav className="flex-1 space-y-1 px-2 py-4">
-            {navigation.map((item) => {
+            {navWithPlugins.map((item) => {
               const isActive = location.pathname === item.href
               return (
                 <Link
@@ -83,7 +93,7 @@ export default function Layout({ children }: LayoutProps) {
             <span className="ml-2 text-xl font-bold text-gray-900">Hisper</span>
           </div>
           <nav className="flex-1 space-y-1 px-2 py-4">
-            {navigation.map((item) => {
+            {navWithPlugins.map((item) => {
               const isActive = location.pathname === item.href
               return (
                 <Link
@@ -129,7 +139,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
             <div className="flex flex-1 items-center">
               <h1 className="text-lg font-semibold text-gray-900">
-                {navigation.find(item => item.href === location.pathname)?.name || 'Hisper'}
+                {navWithPlugins.find(item => item.href === location.pathname)?.name || 'Hisper'}
               </h1>
             </div>
             <div className="flex items-center gap-x-4 lg:gap-x-6">

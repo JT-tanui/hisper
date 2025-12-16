@@ -12,6 +12,7 @@ from .monitoring import router as monitoring_router
 from .mcp import router as mcp_router
 from .chat import router as chat_router
 from .settings import router as settings_router
+from .plugins import router as plugins_router
 
 router = APIRouter()
 
@@ -23,3 +24,4 @@ router.include_router(monitoring_router, prefix="/monitoring", tags=["monitoring
 router.include_router(mcp_router, prefix="/mcp", tags=["mcp"])
 router.include_router(chat_router, prefix="/chat", tags=["chat"])
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
+router.include_router(plugins_router, prefix="/plugins", tags=["plugins"])

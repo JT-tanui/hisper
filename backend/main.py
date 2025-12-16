@@ -19,6 +19,7 @@ from app.services.discovery_service import DiscoveryService
 from app.services.websocket_manager import WebSocketManager
 from app.services.monitoring_service import monitoring_service
 from app.services.mcp_client import mcp_client
+from app.services.plugin_service import PluginService
 
 # Configure logging
 logging.basicConfig(
@@ -36,10 +37,13 @@ discovery_service = DiscoveryService()
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     logger.info("Starting Hisper application...")
-    
+
     # Initialize database
     await init_db()
-    
+
+    # Load plugins and execute lifecycle hooks
+    await app.state.plugin_service.load_plugins()
+
     # Start background services
     asyncio.create_task(discovery_service.start_periodic_discovery())
     
@@ -64,6 +68,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.state.settings = settings
+app.state.plugin_sandboxes = {}
+app.state.plugin_service = PluginService(app)
 
 # Configure CORS
 app.add_middleware(
