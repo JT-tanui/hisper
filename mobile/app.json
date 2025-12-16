@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "HisperMobile",
+    "slug": "hisper-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "hisper",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f172a"
+      },
+      "permissions": ["INTERNET", "RECEIVE_BOOT_COMPLETED"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    }
+  }
+}
