@@ -16,7 +16,7 @@ from app.api import router as api_router
 from app.core.config import settings
 from app.core.database import init_db
 from app.services.discovery_service import DiscoveryService
-from app.services.websocket_manager import WebSocketManager
+from app.services.websocket_manager import websocket_manager
 from app.services.monitoring_service import monitoring_service
 from app.services.mcp_client import mcp_client
 
@@ -28,7 +28,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global instances
-websocket_manager = WebSocketManager()
 discovery_service = DiscoveryService()
 
 
