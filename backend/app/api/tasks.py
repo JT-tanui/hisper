@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 
 from ..core.database import get_sync_db
+from ..core.security import get_current_tenant_context, require_role
 from ..models.task import (
     Task, TaskCreate, TaskUpdate, TaskResponse, TaskExecution,
     TaskStats, TaskQueue, TaskStatus, TaskPriority
 )
 from ..models.mcp_server import MCPServer
+from ..models.auth import Role
 
 router = APIRouter()
 
@@ -26,10 +28,11 @@ async def get_tasks(
     category: Optional[str] = Query(None, description="Filter by task category"),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     session_id: Optional[str] = Query(None, description="Filter by session ID"),
-    db: Session = Depends(get_sync_db)
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context)
 ):
     """Get list of tasks with optional filtering"""
-    query = db.query(Task)
+    query = db.query(Task).filter(Task.tenant_id == request.state.tenant_id)
     
     # Apply filters
     if status:
@@ -62,9 +65,13 @@ async def get_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: int, db: Session = Depends(get_sync_db)):
+async def get_task(
+    task_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context)
+):
     """Get a specific task by ID"""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == request.state.tenant_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
@@ -74,10 +81,13 @@ async def get_task(task_id: int, db: Session = Depends(get_sync_db)):
 async def create_task(
     task: TaskCreate, 
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_sync_db)
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
 ):
     """Create a new task"""
-    db_task = Task(**task.dict())
+    payload = task.dict()
+    payload["tenant_id"] = request.state.tenant_id
+    db_task = Task(**payload)
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
@@ -92,10 +102,11 @@ async def create_task(
 async def update_task(
     task_id: int, 
     task_update: TaskUpdate, 
-    db: Session = Depends(get_sync_db)
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
 ):
     """Update an existing task"""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == request.state.tenant_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -110,9 +121,13 @@ async def update_task(
 
 
 @router.delete("/{task_id}")
-async def delete_task(task_id: int, db: Session = Depends(get_sync_db)):
+async def delete_task(
+    task_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.ADMIN)),
+):
     """Delete a task"""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == request.state.tenant_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -133,10 +148,11 @@ async def execute_task(
     task_id: int,
     execution: TaskExecution,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_sync_db)
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
 ):
     """Execute or re-execute a task"""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == request.state.tenant_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -164,9 +180,13 @@ async def execute_task(
 
 
 @router.post("/{task_id}/cancel")
-async def cancel_task(task_id: int, db: Session = Depends(get_sync_db)):
+async def cancel_task(
+    task_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
+):
     """Cancel a pending or running task"""
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.tenant_id == request.state.tenant_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -183,13 +203,17 @@ async def cancel_task(task_id: int, db: Session = Depends(get_sync_db)):
 
 
 @router.get("/stats/overview", response_model=TaskStats)
-async def get_task_stats(db: Session = Depends(get_sync_db)):
+async def get_task_stats(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context)
+):
     """Get overview statistics for tasks"""
-    total_tasks = db.query(func.count(Task.id)).scalar()
-    pending_tasks = db.query(func.count(Task.id)).filter(Task.status == TaskStatus.PENDING).scalar()
-    running_tasks = db.query(func.count(Task.id)).filter(Task.status == TaskStatus.RUNNING).scalar()
-    completed_tasks = db.query(func.count(Task.id)).filter(Task.status == TaskStatus.COMPLETED).scalar()
-    failed_tasks = db.query(func.count(Task.id)).filter(Task.status == TaskStatus.FAILED).scalar()
+    scoped = db.query(Task).filter(Task.tenant_id == request.state.tenant_id)
+    total_tasks = scoped.count()
+    pending_tasks = scoped.filter(Task.status == TaskStatus.PENDING).count()
+    running_tasks = scoped.filter(Task.status == TaskStatus.RUNNING).count()
+    completed_tasks = scoped.filter(Task.status == TaskStatus.COMPLETED).count()
+    failed_tasks = scoped.filter(Task.status == TaskStatus.FAILED).count()
     
     # Calculate average execution time
     avg_execution_time = db.query(func.avg(Task.execution_time_ms)).filter(
@@ -203,14 +227,14 @@ async def get_task_stats(db: Session = Depends(get_sync_db)):
     
     # Get tasks by category
     tasks_by_category = {}
-    category_results = db.query(Task.category, func.count(Task.id)).group_by(Task.category).all()
+    category_results = scoped.with_entities(Task.category, func.count(Task.id)).group_by(Task.category).all()
     for category, count in category_results:
         if category:
             tasks_by_category[category] = count
     
     # Get tasks by priority
     tasks_by_priority = {}
-    priority_results = db.query(Task.priority, func.count(Task.id)).group_by(Task.priority).all()
+    priority_results = scoped.with_entities(Task.priority, func.count(Task.id)).group_by(Task.priority).all()
     for priority, count in priority_results:
         tasks_by_priority[priority] = count
     
@@ -228,10 +252,13 @@ async def get_task_stats(db: Session = Depends(get_sync_db)):
 
 
 @router.get("/queue/status", response_model=TaskQueue)
-async def get_task_queue(db: Session = Depends(get_sync_db)):
+async def get_task_queue(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context)
+):
     """Get current task queue status"""
-    pending_tasks = db.query(Task).filter(Task.status == TaskStatus.PENDING).order_by(Task.created_at).all()
-    running_tasks = db.query(Task).filter(Task.status == TaskStatus.RUNNING).order_by(Task.started_at).all()
+    pending_tasks = db.query(Task).filter(Task.status == TaskStatus.PENDING, Task.tenant_id == request.state.tenant_id).order_by(Task.created_at).all()
+    running_tasks = db.query(Task).filter(Task.status == TaskStatus.RUNNING, Task.tenant_id == request.state.tenant_id).order_by(Task.started_at).all()
     
     # Estimate wait time based on average execution time and queue position
     avg_execution_time = db.query(func.avg(Task.execution_time_ms)).filter(
@@ -249,9 +276,12 @@ async def get_task_queue(db: Session = Depends(get_sync_db)):
 
 
 @router.get("/categories/list")
-async def get_task_categories(db: Session = Depends(get_sync_db)):
+async def get_task_categories(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context)
+):
     """Get list of all available task categories"""
-    results = db.query(Task.category).distinct().all()
+    results = db.query(Task.category).filter(Task.tenant_id == request.state.tenant_id).distinct().all()
     categories = [cat[0] for cat in results if cat[0]]
     
     return {"categories": sorted(categories)}

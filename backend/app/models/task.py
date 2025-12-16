@@ -36,6 +36,7 @@ class Task(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text)
+    tenant_id = Column(String(100), index=True, default="default")
     
     # Task execution details
     status = Column(String(20), default=TaskStatus.PENDING)

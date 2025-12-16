@@ -18,6 +18,7 @@ class MCPServer(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
+    tenant_id = Column(String(100), index=True, default="default")
     url = Column(String(500), nullable=False)
     repository_url = Column(String(500))
     package_manager = Column(String(50))  # npm, pip, cargo, etc.

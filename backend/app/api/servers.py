@@ -3,15 +3,19 @@ MCP Server management API endpoints
 """
 
 from typing import List, Optional
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from ..core.database import get_sync_db
+from ..core.security import get_current_tenant_context, require_role
 from ..models.mcp_server import (
-    MCPServer, MCPServerCreate, MCPServerUpdate, MCPServerResponse, 
+    MCPServer, MCPServerCreate, MCPServerUpdate, MCPServerResponse,
     MCPServerStats, MCPServerHealth
 )
+from ..models.auth import Role
 
 router = APIRouter()
 
@@ -25,10 +29,11 @@ async def get_servers(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     is_verified: Optional[bool] = Query(None, description="Filter by verified status"),
     search: Optional[str] = Query(None, description="Search in name and description"),
-    db: Session = Depends(get_sync_db)
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
 ):
     """Get list of MCP servers with optional filtering"""
-    query = db.query(MCPServer)
+    query = db.query(MCPServer).filter(MCPServer.tenant_id == request.state.tenant_id)
     
     # Apply filters
     if category:
@@ -58,21 +63,30 @@ async def get_servers(
 
 
 @router.get("/{server_id}", response_model=MCPServerResponse)
-async def get_server(server_id: int, db: Session = Depends(get_sync_db)):
+async def get_server(
+    server_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
+):
     """Get a specific MCP server by ID"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     return server
 
 
 @router.post("/", response_model=MCPServerResponse)
-async def create_server(server: MCPServerCreate, db: Session = Depends(get_sync_db)):
+async def create_server(
+    server: MCPServerCreate,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.ADMIN)),
+):
     """Create a new MCP server"""
     # Check if server with same name and URL already exists
     existing = db.query(MCPServer).filter(
         MCPServer.name == server.name,
-        MCPServer.url == server.url
+        MCPServer.url == server.url,
+        MCPServer.tenant_id == request.state.tenant_id,
     ).first()
     
     if existing:
@@ -81,7 +95,9 @@ async def create_server(server: MCPServerCreate, db: Session = Depends(get_sync_
             detail="Server with this name and URL already exists"
         )
     
-    db_server = MCPServer(**server.dict())
+    payload = server.dict()
+    payload["tenant_id"] = request.state.tenant_id
+    db_server = MCPServer(**payload)
     db.add(db_server)
     db.commit()
     db.refresh(db_server)
@@ -90,12 +106,13 @@ async def create_server(server: MCPServerCreate, db: Session = Depends(get_sync_
 
 @router.put("/{server_id}", response_model=MCPServerResponse)
 async def update_server(
-    server_id: int, 
-    server_update: MCPServerUpdate, 
-    db: Session = Depends(get_sync_db)
+    server_id: int,
+    server_update: MCPServerUpdate,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
 ):
     """Update an existing MCP server"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     
@@ -110,9 +127,13 @@ async def update_server(
 
 
 @router.delete("/{server_id}")
-async def delete_server(server_id: int, db: Session = Depends(get_sync_db)):
+async def delete_server(
+    server_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.ADMIN)),
+):
     """Delete an MCP server"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     
@@ -122,14 +143,18 @@ async def delete_server(server_id: int, db: Session = Depends(get_sync_db)):
 
 
 @router.get("/stats/overview", response_model=MCPServerStats)
-async def get_server_stats(db: Session = Depends(get_sync_db)):
+async def get_server_stats(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
+):
     """Get overview statistics for MCP servers"""
-    total_servers = db.query(func.count(MCPServer.id)).scalar()
-    active_servers = db.query(func.count(MCPServer.id)).filter(MCPServer.is_active == True).scalar()
-    healthy_servers = db.query(func.count(MCPServer.id)).filter(MCPServer.health_status == "healthy").scalar()
+    scoped = db.query(MCPServer).filter(MCPServer.tenant_id == request.state.tenant_id)
+    total_servers = scoped.count()
+    active_servers = scoped.filter(MCPServer.is_active == True).count()
+    healthy_servers = scoped.filter(MCPServer.health_status == "healthy").count()
     
     # Get category distribution
-    servers_with_categories = db.query(MCPServer).filter(MCPServer.categories.isnot(None)).all()
+    servers_with_categories = scoped.filter(MCPServer.categories.isnot(None)).all()
     categories = {}
     for server in servers_with_categories:
         if server.categories:
@@ -138,14 +163,14 @@ async def get_server_stats(db: Session = Depends(get_sync_db)):
     
     # Get package manager distribution
     package_managers = {}
-    pm_results = db.query(MCPServer.package_manager, func.count(MCPServer.id)).group_by(MCPServer.package_manager).all()
+    pm_results = scoped.with_entities(MCPServer.package_manager, func.count(MCPServer.id)).group_by(MCPServer.package_manager).all()
     for pm, count in pm_results:
         if pm:
             package_managers[pm] = count
     
     # Get discovery source distribution
     discovery_sources = {}
-    ds_results = db.query(MCPServer.discovered_from, func.count(MCPServer.id)).group_by(MCPServer.discovered_from).all()
+    ds_results = scoped.with_entities(MCPServer.discovered_from, func.count(MCPServer.id)).group_by(MCPServer.discovered_from).all()
     for source, count in ds_results:
         if source:
             discovery_sources[source] = count
@@ -161,9 +186,13 @@ async def get_server_stats(db: Session = Depends(get_sync_db)):
 
 
 @router.get("/{server_id}/health", response_model=MCPServerHealth)
-async def get_server_health(server_id: int, db: Session = Depends(get_sync_db)):
+async def get_server_health(
+    server_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
+):
     """Get health information for a specific server"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     
@@ -177,9 +206,13 @@ async def get_server_health(server_id: int, db: Session = Depends(get_sync_db)):
 
 
 @router.post("/{server_id}/verify")
-async def verify_server(server_id: int, db: Session = Depends(get_sync_db)):
+async def verify_server(
+    server_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
+):
     """Verify a server's capabilities and mark as verified"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     
@@ -193,9 +226,13 @@ async def verify_server(server_id: int, db: Session = Depends(get_sync_db)):
 
 
 @router.post("/{server_id}/health-check")
-async def check_server_health(server_id: int, db: Session = Depends(get_sync_db)):
+async def check_server_health(
+    server_id: int,
+    db: Session = Depends(get_sync_db),
+    request=Depends(require_role(Role.OPERATOR)),
+):
     """Perform a health check on a specific server"""
-    server = db.query(MCPServer).filter(MCPServer.id == server_id).first()
+    server = db.query(MCPServer).filter(MCPServer.id == server_id, MCPServer.tenant_id == request.state.tenant_id).first()
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
     
@@ -211,9 +248,12 @@ async def check_server_health(server_id: int, db: Session = Depends(get_sync_db)
 
 
 @router.get("/categories/list")
-async def get_categories(db: Session = Depends(get_sync_db)):
+async def get_categories(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
+):
     """Get list of all available categories"""
-    servers_with_categories = db.query(MCPServer).filter(MCPServer.categories.isnot(None)).all()
+    servers_with_categories = db.query(MCPServer).filter(MCPServer.categories.isnot(None), MCPServer.tenant_id == request.state.tenant_id).all()
     categories = set()
     for server in servers_with_categories:
         if server.categories:
@@ -223,9 +263,12 @@ async def get_categories(db: Session = Depends(get_sync_db)):
 
 
 @router.get("/package-managers/list")
-async def get_package_managers(db: Session = Depends(get_sync_db)):
+async def get_package_managers(
+    db: Session = Depends(get_sync_db),
+    request=Depends(get_current_tenant_context),
+):
     """Get list of all available package managers"""
-    results = db.query(MCPServer.package_manager).distinct().all()
+    results = db.query(MCPServer.package_manager).filter(MCPServer.tenant_id == request.state.tenant_id).distinct().all()
     package_managers = [pm[0] for pm in results if pm[0]]
     
     return {"package_managers": sorted(package_managers)}

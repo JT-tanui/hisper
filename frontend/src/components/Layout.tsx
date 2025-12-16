@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { 
   Home, 
@@ -11,7 +11,7 @@ import {
   Menu,
   X
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState as useStateAlias } from 'react'
 
 interface LayoutProps {
   children: ReactNode
@@ -28,7 +28,21 @@ const navigation = [
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useStateAlias(false)
+  const [tenantId, setTenantId] = useState(() => localStorage.getItem('tenant_id') || 'default')
+
+  const tenants = useMemo(
+    () => [
+      { id: 'default', name: 'Default' },
+      { id: 'demo', name: 'Demo Org' },
+      { id: 'analytics', name: 'Analytics Lab' },
+    ],
+    []
+  )
+
+  useEffect(() => {
+    localStorage.setItem('tenant_id', tenantId)
+  }, [tenantId])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -133,6 +147,19 @@ export default function Layout({ children }: LayoutProps) {
               </h1>
             </div>
             <div className="flex items-center gap-x-4 lg:gap-x-6">
+              <div className="flex items-center space-x-2">
+                <label className="text-sm text-gray-500" htmlFor="tenant-select">Tenant</label>
+                <select
+                  id="tenant-select"
+                  value={tenantId}
+                  onChange={(e) => setTenantId(e.target.value)}
+                  className="rounded-md border-gray-300 text-sm shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                >
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center space-x-2">
                 <div className="h-2 w-2 bg-green-400 rounded-full animate-pulse"></div>
                 <span className="text-sm text-gray-500">Connected</span>
