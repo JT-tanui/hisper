@@ -38,6 +38,8 @@ Base = declarative_base()
 
 async def init_db():
     """Initialize database tables"""
+    # Import models to register metadata
+    from .. import models  # noqa: F401
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

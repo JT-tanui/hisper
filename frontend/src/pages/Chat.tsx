@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Zap, Server, TrendingUp, HelpCircle } from 'lucide-react';
 import ChatInterface from '../components/ChatInterface';
+import VoiceChatWidget from '../components/VoiceChatWidget';
 
 const Chat: React.FC = () => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -67,6 +68,7 @@ const Chat: React.FC = () => {
 
           {/* Sidebar */}
           <div className="space-y-6">
+            <VoiceChatWidget />
             {/* Quick Stats */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
