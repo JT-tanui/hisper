@@ -16,6 +16,7 @@ from ..services.mcp_client import mcp_client
 from ..services.task_service import task_service
 from ..models.mcp_server import MCPServer
 from sqlalchemy import select
+from ..services.conversation_service import conversation_service
 
 router = APIRouter()
 
@@ -44,6 +45,24 @@ class ChatAction(BaseModel):
     type: str  # 'search_servers', 'connect_server', 'execute_tool', 'create_task'
     parameters: Dict[str, Any]
     description: str
+
+
+class ChatHistoryRequest(BaseModel):
+    conversation_id: int
+    max_tokens: int = 800
+    include_summaries: bool = True
+
+
+class ChatHistoryMessage(BaseModel):
+    id: int
+    role: str
+    content: str
+    pinned: bool = False
+    created_at: str
+    audio_blob_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
 
 
 @router.post("/analyze")
@@ -325,3 +344,40 @@ async def get_chat_stats():
         "successRate": 0.0,
         "averageResponseTime": 0.0
     }
+
+
+@router.post("/history")
+async def get_chat_history(
+    request: ChatHistoryRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Return a sliced conversation history with summaries and pinned context."""
+    try:
+        conversation = await conversation_service.get_or_create_conversation(
+            db, request.conversation_id
+        )
+        messages = await conversation_service.slice_history(
+            db,
+            conversation_id=conversation.id,
+            max_tokens=request.max_tokens,
+            include_summaries=request.include_summaries,
+        )
+        payload = [
+            ChatHistoryMessage(
+                id=msg.id,
+                role=msg.role,
+                content=msg.content,
+                pinned=msg.pinned,
+                created_at=msg.created_at.isoformat(),
+                audio_blob_id=getattr(msg, "audio_blob_id", None),
+            ).model_dump()
+            for msg in messages
+        ]
+        return {
+            "conversation_id": conversation.id,
+            "messages": payload,
+            "pinned_context": conversation.pinned_context or [],
+            "summary": conversation.summary_text,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
