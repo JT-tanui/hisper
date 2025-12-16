@@ -2,6 +2,7 @@
 WebSocket connection manager for real-time updates
 """
 
+import asyncio
 import json
 import logging
 from typing import List, Dict, Any
@@ -83,6 +84,19 @@ class WebSocketManager:
         # Remove disconnected connections
         for connection in disconnected:
             self.disconnect(connection)
+
+    def enqueue_broadcast(self, data: Dict[str, Any]):
+        """Schedule a broadcast from sync contexts like services."""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            logger.warning("No running event loop to publish websocket message")
+            return
+
+        if loop.is_running():
+            loop.create_task(self.broadcast_json(data))
+        else:
+            logger.warning("Event loop not running; unable to enqueue websocket broadcast")
     
     async def broadcast_to_user(self, user_id: str, data: Dict[str, Any]):
         """Broadcast data to all connections for a specific user"""
@@ -153,3 +167,7 @@ class WebSocketManager:
             }
             for info in self.connection_info.values()
         ]
+
+
+# Shared instance for application-wide notifications
+websocket_manager = WebSocketManager()

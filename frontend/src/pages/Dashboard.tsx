@@ -1,8 +1,9 @@
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { 
-  Server, 
-  CheckSquare, 
-  Activity, 
+import {
+  Server,
+  CheckSquare,
+  Activity,
   Search,
   MessageSquare,
   TrendingUp,
@@ -12,10 +13,22 @@ import {
   Zap,
   Bot
 } from 'lucide-react'
-import { serverApi, taskApi } from '../services/api'
+import { analyticsApi, serverApi, taskApi } from '../services/api'
 import { Link } from 'react-router-dom'
 
 export default function Dashboard() {
+  const [filters, setFilters] = useState({ tenant: '', serverId: '', taskType: '' })
+  const analyticsParams = useMemo(
+    () => ({
+      tenant: filters.tenant || undefined,
+      server_id: filters.serverId ? Number(filters.serverId) : undefined,
+      task_type: filters.taskType || undefined,
+      hours: 24,
+      horizon: 8,
+    }),
+    [filters]
+  )
+
   const { data: serverStats, isLoading: serverStatsLoading } = useQuery({
     queryKey: ['server-stats'],
     queryFn: () => serverApi.getServerStats().then(res => res.data),
@@ -34,6 +47,22 @@ export default function Dashboard() {
   const { data: recentTasks } = useQuery({
     queryKey: ['recent-tasks'],
     queryFn: () => taskApi.getTasks({ limit: 5 }).then(res => res.data),
+  })
+
+  const { data: forecastData } = useQuery({
+    queryKey: ['analytics-forecast', analyticsParams],
+    queryFn: () => analyticsApi.getForecast(analyticsParams).then(res => res.data),
+  })
+
+  const { data: anomaliesData } = useQuery({
+    queryKey: ['analytics-anomalies'],
+    queryFn: () => analyticsApi.getAnomalies().then(res => res.data),
+    refetchInterval: 30000,
+  })
+
+  const { data: recommendationsData } = useQuery({
+    queryKey: ['analytics-recommendations', analyticsParams],
+    queryFn: () => analyticsApi.getRecommendations().then(res => res.data),
   })
 
   const stats = [
@@ -83,6 +112,44 @@ export default function Dashboard() {
         <p className="mt-1 text-sm text-gray-500">
           Overview of your MCP server discovery and task management system
         </p>
+      </div>
+
+      <div className="card">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-lg font-medium text-gray-900">Analytics filters</h2>
+            <p className="text-sm text-gray-500">Segment forecasts by tenant, server, or task type.</p>
+          </div>
+          <div className="flex flex-col gap-3 md:flex-row">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Tenant</label>
+              <input
+                className="input"
+                placeholder="acme-co"
+                value={filters.tenant}
+                onChange={e => setFilters(prev => ({ ...prev, tenant: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Server ID</label>
+              <input
+                className="input"
+                placeholder="123"
+                value={filters.serverId}
+                onChange={e => setFilters(prev => ({ ...prev, serverId: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Task type</label>
+              <input
+                className="input"
+                placeholder="batch | realtime"
+                value={filters.taskType}
+                onChange={e => setFilters(prev => ({ ...prev, taskType: e.target.value }))}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* AI Chat Feature Highlight */}
@@ -168,6 +235,106 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Analytics */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="card lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-medium text-gray-900">Forecasted load</h2>
+              <p className="text-sm text-gray-500">Forward-looking CPU and success rate projections.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase text-gray-500">Avg load</p>
+              <p className="text-xl font-semibold text-gray-900">
+                {forecastData?.summary?.average_load?.toFixed(1) ?? '—'}%
+              </p>
+              <p className="text-xs text-emerald-600">
+                Success {((forecastData?.summary?.average_success_rate || 0) * 100).toFixed(1)}%
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {(forecastData?.forecast || []).map((point: any) => (
+              <div key={point.timestamp} className="border border-gray-100 rounded-lg p-3">
+                <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                  <span>{new Date(point.timestamp).toLocaleString()}</span>
+                  <span className="font-semibold text-gray-900">{point.load.toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-2 bg-primary-500"
+                    style={{ width: `${Math.min(100, point.load)}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                  <span>Range {point.lower.toFixed(1)}% - {point.upper.toFixed(1)}%</span>
+                  <span>Success {(point.success_rate * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+            ))}
+            {!forecastData?.forecast?.length && (
+              <div className="text-sm text-gray-500">No forecast data yet. Keep monitoring to populate the trend.</div>
+            )}
+          </div>
+        </div>
+        <div className="space-y-5">
+          <div className="card">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900">Anomaly timeline</h3>
+                <p className="text-sm text-gray-500">Latest detections and thresholds.</p>
+              </div>
+              <span className="px-3 py-1 rounded-full text-xs bg-amber-100 text-amber-800">
+                {anomaliesData?.total || 0} open
+              </span>
+            </div>
+            <div className="space-y-3">
+              {(anomaliesData?.anomalies || []).map((item: any, idx: number) => (
+                <div key={`${item.timestamp}-${idx}`} className="border border-gray-100 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 capitalize">{item.metric.replace('_', ' ')}</p>
+                      <p className="text-xs text-gray-500">Value {item.value.toFixed(2)} vs threshold {item.threshold.toFixed(2)}</p>
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs ${
+                        item.severity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+                      }`}
+                    >
+                      {item.severity}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{new Date(item.timestamp).toLocaleString()}</p>
+                </div>
+              ))}
+              {!anomaliesData?.anomalies?.length && (
+                <p className="text-sm text-gray-500">No anomalies detected for the selected filters.</p>
+              )}
+            </div>
+          </div>
+          <div className="card">
+            <div className="flex items-center mb-3">
+              <CheckCircle className="h-4 w-4 text-emerald-600" />
+              <h3 className="text-lg font-medium text-gray-900 ml-2">Recommendations</h3>
+            </div>
+            <div className="space-y-3">
+              {(recommendationsData?.recommendations || []).map((rec: any, idx: number) => (
+                <div key={`${rec.title}-${idx}`} className="border border-gray-100 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="font-semibold text-gray-900">{rec.title}</p>
+                    <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-700 uppercase">{rec.impact}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1">{rec.detail}</p>
+                </div>
+              ))}
+              {!recommendationsData?.recommendations?.length && (
+                <p className="text-sm text-gray-500">Recommendations will appear as data accumulates.</p>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Quick Actions */}

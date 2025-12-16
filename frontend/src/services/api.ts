@@ -202,8 +202,15 @@ export const discoveryApi = {
   clearUnverifiedServers: () => api.delete('/discovery/clear-unverified'),
   
   verifyAllServers: () => api.post('/discovery/verify-all'),
-  
+
   getDiscoveryConfig: () => api.get('/discovery/config'),
+}
+
+export const analyticsApi = {
+  getForecast: (params?: { hours?: number; horizon?: number; tenant?: string; server_id?: number; task_type?: string }) =>
+    api.get('/analytics/forecast', { params }),
+  getAnomalies: () => api.get('/analytics/anomalies'),
+  getRecommendations: () => api.get('/analytics/recommendations'),
 }
 
 export default api
